@@ -34,7 +34,7 @@ dependencies {
 </repositories>
 ```
 
-```maven
+```xml
 <dependencies>
   <dependency>
     <groupId>me.kgustave</groupId>
