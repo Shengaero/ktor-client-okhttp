@@ -1,0 +1,214 @@
+buildscript {
+    repositories {
+        jcenter()
+    }
+
+    dependencies {
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
+        classpath "org.jetbrains.dokka:dokka-gradle-plugin:$dokkaVersion"
+        classpath "org.junit.platform:junit-platform-gradle-plugin:$junitVersion"
+        classpath "com.jfrog.bintray.gradle:gradle-bintray-plugin:$bintrayVersion"
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'idea'
+apply plugin: 'kotlin'
+apply plugin: 'maven-publish'
+apply plugin: 'com.jfrog.bintray'
+apply plugin: 'org.jetbrains.dokka'
+apply plugin: 'org.junit.platform.gradle.plugin'
+
+group = 'me.kgustave'
+version = '0.1.0'
+
+sourceCompatibility = 1.8
+
+ext {
+    dependencies {
+        kotlinLibrary = { String module -> "org.jetbrains.kotlin:kotlin-$module:$kotlinVersion" }
+        kotlinxCoroutines = { String module -> "org.jetbrains.kotlinx:kotlinx-coroutines-$module:$kotlinxCoroutines" }
+        ktor = { String module -> "io.ktor:ktor-$module:$ktorVersion" }
+        okHttp = { "com.squareup.okhttp3:okhttp:$okHttpVersion" }
+        junitJupiter = { String module -> "org.junit.jupiter:junit-jupiter-$module:$jupiterVersion" }
+    }
+}
+
+sourceSets {
+    test {
+        kotlin.srcDirs += 'src/test/kotlin'
+
+        compileClasspath += main.compileClasspath
+        runtimeClasspath += main.runtimeClasspath
+    }
+}
+
+repositories {
+    jcenter()
+    maven { url = "https://dl.bintray.com/kotlin/ktor" }
+}
+
+dependencies {
+    compile ktor('client-core')
+    compile okHttp()
+
+    compileOnly kotlinLibrary('stdlib')
+    compileOnly kotlinLibrary('stdlib-jdk8')
+    compileOnly kotlinLibrary('stdlib-jdk7')
+
+    testCompile kotlinLibrary('test-junit')
+    testCompile ktor('client-json')
+    testCompile ktor('client-tests')
+    testCompile ktor('server-core')
+    testCompile ktor('server-netty')
+    testCompile ktor('gson')
+    testCompile junitJupiter('api')
+    testCompile junitJupiter('params')
+    testRuntime junitJupiter('engine')
+}
+
+kotlin {
+    experimental {
+        coroutines = 'ENABLE'
+    }
+}
+
+compileKotlin {
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+compileTestKotlin {
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+bintray {
+    def keysFile = rootProject.file("keys/keys.properties")
+    if(keysFile.exists()) {
+        def keys = new Properties()
+        keysFile.withReader { keys.load(it) }
+        user = keys['bintray.user.name']
+        key = keys['bintray.api.key']
+    }
+
+    publications = ['BintrayRelease']
+    publish = true
+
+    pkg {
+        repo = 'maven'
+        name = 'ktor-client-okhttp'
+        licenses = ['Apache-2.0']
+        vcsUrl = 'https://github.com/Shengaero/ktor-client-okhttp.git'
+        githubRepo = 'https://github.com/Shengaero/ktor-client-okhttp/'
+        version {
+            name = project.version
+            released = new Date()
+        }
+    }
+}
+
+jar {
+    baseName = "ktor-client-okhttp"
+    version = "$version"
+    classifier = ''
+
+    manifest {
+        attributes 'Implementation-Version': "$version",
+                   'Automatic-Module-Name': "ktor.client.okhttp"
+    }
+}
+
+dokka {
+    outputFormat = 'html'
+    outputDirectory = "$buildDir/dokka"
+    jdkVersion = 8
+    impliedPlatforms = ['JVM']
+    noStdlibLink = false
+    skipDeprecated = true
+    skipEmptyPackages = true
+    reportUndocumented = false
+    includeNonPublic = false
+}
+
+task dokkaJar(type: Jar, dependsOn: dokka) {
+    group = 'build'
+    description = 'Generates a dokka jar'
+
+    baseName = "ktor-client-okhttp"
+    version = "$version"
+    classifier = 'javadoc'
+    logging.level = LogLevel.QUIET
+    from dokka.outputDirectory
+}
+
+task sourcesJar(type: Jar) {
+    group = 'build'
+    description = 'Generates a sources jar'
+
+    baseName = "ktor-client-okhttp"
+    version = "$project.version"
+    classifier = 'sources'
+    from { sourceSets.main.allSource }
+}
+
+build {
+    dependsOn dokkaJar
+    dependsOn sourcesJar
+    dependsOn classes
+    dependsOn jar
+
+    sourcesJar.mustRunAfter dokkaJar
+    classes.mustRunAfter sourcesJar
+    jar.mustRunAfter classes
+}
+
+bintrayUpload {
+    dependsOn clean
+    dependsOn build
+
+    build.mustRunAfter clean
+}
+
+wrapper {
+    gradleVersion = '4.6'
+}
+
+publishing {
+    publications {
+        BintrayRelease(MavenPublication) {
+            groupId = project.group
+            artifactId = project.name
+            version = project.version
+
+            artifact project.tasks.sourcesJar
+
+            pom.withXml {
+                def repositoriesNode = asNode().appendNode('repositories')
+
+                def jcenterNode = repositoriesNode.appendNode('repository')
+                jcenterNode.appendNode('id', 'jcenter')
+                jcenterNode.appendNode('url', 'http://jcenter.bintray.com')
+
+                def ktorRepoNode = repositoriesNode.appendNode('repository')
+                ktorRepoNode.appendNode('id', 'ktor')
+                ktorRepoNode.appendNode('url', 'http://dl.bintray.com/kotlin/ktor')
+
+                def kotlinxRepoNode = repositoriesNode.appendNode('repository')
+                kotlinxRepoNode.appendNode('id', 'kotlinx')
+                kotlinxRepoNode.appendNode('url', 'http://dl.bintray.com/kotlin/kotlinx')
+
+                def dependenciesNode = asNode().appendNode('dependencies')
+                project.configurations.compile.dependencies.each {
+                    def dependencyNode = dependenciesNode.appendNode('dependency')
+                    dependencyNode.appendNode('groupId', it.group)
+                    dependencyNode.appendNode('artifactId', it.name)
+                    dependencyNode.appendNode('version', it.version)
+                    dependencyNode.appendNode('scope', 'compile')
+                }
+            }
+        }
+    }
+}
